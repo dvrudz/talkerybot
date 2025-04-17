@@ -1,3 +1,9 @@
+import os
+from dotenv import load_dotenv
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
+
 load_dotenv()
 
 # Получаем URL базы данных из переменной окружения
@@ -10,3 +16,7 @@ if original_db_url and original_db_url.startswith("postgresql://"):
 
 engine = create_async_engine(DATABASE_URL, echo=True, poolclass=NullPool)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+async def get_session() -> AsyncSession:
+    async with async_session() as session:
+        yield session
