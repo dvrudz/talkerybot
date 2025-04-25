@@ -9,3 +9,4 @@ Jinja2>=3.1.2
 pydantic>=2.3.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.1
+psutil>=5.9.0
