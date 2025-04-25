@@ -9,10 +9,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
-# Настройка логирования
+# Настройка логирования с более детальным уровнем
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.DEBUG,  # Изменено с INFO на DEBUG для получения больше информации
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
@@ -49,13 +49,31 @@ async def start_bot():
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
     
+    # Добавляем обработчик ошибок
+    @dp.errors()
+    async def errors_handler(exception):
+        logger.exception(f"Ошибка в обработчике: {exception}")
+        return True
+    
     # Динамический импорт обработчиков
     try:
         logger.info("Импорт обработчиков...")
+        
+        # Проверяем наличие файлов перед импортом
+        import os.path
+        handlers_path = 'app/handlers'
+        logger.debug(f"Файлы в директории {handlers_path}: {os.listdir(handlers_path) if os.path.exists(handlers_path) else 'Директория не найдена'}")
+        
         from app.handlers import registration, menu, learning, training, settings, admin, review
+        
+        # Выводим информацию о регистрационном обработчике
+        logger.debug(f"Регистрационный модуль импортирован: {registration}")
+        logger.debug(f"Роутеры в регистрационном модуле: {registration.router}")
+        
         from app.database.db import get_session
         
         # Регистрация роутеров
+        logger.info("Регистрация роутеров...")
         dp.include_router(registration.router)
         dp.include_router(menu.router)
         dp.include_router(learning.router)
@@ -67,10 +85,14 @@ async def start_bot():
         # Middleware для добавления сессии базы данных в хэндлеры
         @dp.update.outer_middleware()
         async def db_session_middleware(handler, event, data):
-            logger.info(f"Обработка обновления: {type(event).__name__}")
+            logger.debug(f"Обработка обновления: {type(event).__name__}")
             async for session in get_session():
                 data["session"] = session
-                return await handler(event, data)
+                try:
+                    return await handler(event, data)
+                except Exception as e:
+                    logger.exception(f"Ошибка при обработке события {type(event).__name__}: {e}")
+                    raise
     except Exception as e:
         logger.error(f"Ошибка при импорте обработчиков: {e}")
         logger.exception("Трассировка:")
@@ -83,6 +105,12 @@ async def start_bot():
     except Exception as e:
         logger.error(f"Ошибка при проверке доступности бота: {e}")
         sys.exit(1)
+    
+    # Добавим базовый обработчик для всех сообщений для отладки
+    @dp.message()
+    async def debug_message_handler(message, bot):
+        logger.debug(f"Получено сообщение: {message.text}")
+        # Не отвечаем, просто логируем для отладки
     
     # Запуск бота
     logger.info("Запуск бота в режиме polling...")
