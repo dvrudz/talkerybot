@@ -1,7 +1,7 @@
 import asyncio
 import csv
 import os
-from sqlalchemy import insert
+from sqlalchemy import insert, text
 from dotenv import load_dotenv
 
 from app.database.models import Word
@@ -41,7 +41,7 @@ async def insert_words():
     
     async with async_session() as session:
         # First check if words already exist
-        result = await session.execute("SELECT COUNT(*) FROM words")
+        result = await session.execute(text("SELECT COUNT(*) FROM words"))
         count = result.scalar()
         
         if count > 0:
@@ -96,4 +96,4 @@ if __name__ == "__main__":
     asyncio.run(insert_words())
     
     # Export words to CSV for reference
-    export_words_to_csv() 
+    export_words_to_csv()
