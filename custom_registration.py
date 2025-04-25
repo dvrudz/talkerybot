@@ -164,10 +164,24 @@ async def delete_webhook():
     """Удаляет webhook если он установлен"""
     try:
         bot_temp = Bot(token=BOT_TOKEN)
-        await bot_temp.delete_webhook()
+        # Убедимся, что установлено ограничение времени
+        await bot_temp.delete_webhook(drop_pending_updates=True)
+        # Проверяем результат
         info = await bot_temp.get_webhook_info()
         logger.info(f"Webhook удален: {info.url is None}")
+        if info.url is not None:
+            logger.warning(f"Webhook не был удален! URL: {info.url}")
+            # Повторяем попытку
+            await bot_temp.delete_webhook(drop_pending_updates=True)
+            info = await bot_temp.get_webhook_info()
+            logger.info(f"Повторная попытка удаления webhook: {info.url is None}")
+        
+        # Закрываем сессию
         await bot_temp.session.close()
+        
+        # Добавляем задержку после удаления webhook
+        logger.info("Ожидаем 5 секунд для стабилизации после удаления webhook")
+        await asyncio.sleep(5)
     except Exception as e:
         logger.error(f"Ошибка при удалении webhook: {e}")
 
@@ -212,6 +226,23 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=run_server)
     server_thread.daemon = True
     server_thread.start()
+    
+    # Завершаем все существующие процессы бота (для Render.com)
+    try:
+        import psutil
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            if proc.info['pid'] != current_pid and 'python' in proc.info['name'] and 'custom_registration.py' in ' '.join(proc.info.get('cmdline', [])):
+                logger.warning(f"Найден другой процесс бота (PID: {proc.info['pid']}), пытаемся завершить")
+                try:
+                    psutil.Process(proc.info['pid']).terminate()
+                    logger.info(f"Процесс {proc.info['pid']} завершен")
+                except Exception as e:
+                    logger.error(f"Ошибка при завершении процесса {proc.info['pid']}: {e}")
+    except ImportError:
+        logger.warning("Библиотека psutil не установлена. Невозможно проверить другие процессы.")
+    except Exception as e:
+        logger.error(f"Ошибка при поиске других процессов: {e}")
     
     # Запускаем бота
     asyncio.run(main())
