@@ -3,15 +3,16 @@ import asyncio
 import logging
 import os
 import sys
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher, Router, types
+from aiogram.filters import Command, CommandStart
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
-# Настройка логирования с более детальным уровнем
+# Настройка логирования
 logging.basicConfig(
-    level=logging.DEBUG,  # Изменено с INFO на DEBUG для получения больше информации
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     stream=sys.stdout
 )
@@ -26,100 +27,115 @@ if not BOT_TOKEN:
     logger.error("Ошибка: BOT_TOKEN не найден в переменных окружения")
     sys.exit(1)
 
-# Удаление webhook
+# Создаем роутер
+router = Router()
+
+# Простая клавиатура для демонстрации
+def demo_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton("🇬🇧 Английский"), KeyboardButton("🇩🇪 Немецкий"))
+    keyboard.add(KeyboardButton("Помощь"), KeyboardButton("О боте"))
+    return keyboard
+
+# Обработчики команд
+@router.message(CommandStart())
+async def cmd_start(message: types.Message):
+    """
+    Обработчик команды /start.
+    """
+    try:
+        await message.answer(
+            "Добро пожаловать в TalkeryBot - ваш помощник в изучении языков! 🎓\n\n"
+            "Я работаю в упрощенном режиме. Выберите опцию из меню:",
+            reply_markup=demo_keyboard()
+        )
+        logger.info(f"Отправлено приветствие пользователю: {message.from_user.id}")
+    except Exception as e:
+        logger.exception(f"Ошибка в обработчике start: {e}")
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова позже.")
+
+@router.message(Command("help"))
+async def cmd_help(message: types.Message):
+    """Обработчик команды /help"""
+    await message.answer(
+        "Справка по использованию бота:\n"
+        "• /start - начать работу с ботом\n"
+        "• /help - показать эту справку\n"
+        "• /about - информация о боте\n"
+    )
+    logger.info(f"Отправлена справка пользователю: {message.from_user.id}")
+
+@router.message(Command("about"))
+async def cmd_about(message: types.Message):
+    """Обработчик команды /about"""
+    await message.answer(
+        "О боте TalkeryBot:\n\n"
+        "Версия: 1.0.0\n"
+        "Создатель: @dvrudz\n\n"
+        "Бот предназначен для изучения иностранных языков с помощью технологии интервальных повторений."
+    )
+    logger.info(f"Отправлена информация о боте пользователю: {message.from_user.id}")
+
+# Обработчик текстовых сообщений
+@router.message()
+async def echo_message(message: types.Message):
+    """Эхо-обработчик для любых текстовых сообщений"""
+    try:
+        if message.text == "Помощь":
+            await cmd_help(message)
+        elif message.text == "О боте":
+            await cmd_about(message)
+        elif message.text in ["🇬🇧 Английский", "🇩🇪 Немецкий"]:
+            language = "английский" if message.text == "🇬🇧 Английский" else "немецкий"
+            await message.answer(
+                f"Вы выбрали {language} язык.\n"
+                f"В настоящий момент бот работает в демонстрационном режиме."
+            )
+            logger.info(f"Пользователь {message.from_user.id} выбрал язык: {language}")
+        else:
+            await message.answer(
+                "Я не понимаю такую команду.\n"
+                "Используйте кнопки или введите /help для справки.",
+                reply_markup=demo_keyboard()
+            )
+    except Exception as e:
+        logger.exception(f"Ошибка при обработке сообщения: {e}")
+        await message.answer("Произошла ошибка при обработке сообщения.")
+
+# Функция для удаления webhook перед запуском
 async def delete_webhook():
     """Удаляет webhook если он установлен"""
     try:
         bot_temp = Bot(token=BOT_TOKEN)
-        await bot_temp.delete_webhook()
+        # Принудительно удаляем вебхук
+        await bot_temp.delete_webhook(drop_pending_updates=True)
+        # Проверяем результат
         info = await bot_temp.get_webhook_info()
         logger.info(f"Webhook удален: {info.url is None}")
+        
+        # Закрываем сессию
         await bot_temp.session.close()
+        
+        # Добавляем задержку после удаления webhook
+        logger.info("Ожидаем 3 секунды для стабилизации после удаления webhook")
+        await asyncio.sleep(3)
     except Exception as e:
         logger.error(f"Ошибка при удалении webhook: {e}")
 
-async def start_bot():
-    """Запускает бота в режиме long polling"""
-    logger.info("Инициализация бота...")
-    
-    # Сначала удаляем webhook если он установлен
+# Запуск бота
+async def main():
+    # Удаляем webhook перед запуском бота
     await delete_webhook()
     
     # Инициализация бота и диспетчера
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher()
     
-    # Добавляем обработчик ошибок
-    @dp.errors()
-    async def errors_handler(exception):
-        logger.exception(f"Ошибка в обработчике: {exception}")
-        return True
-    
-    # Динамический импорт обработчиков
-    try:
-        logger.info("Импорт обработчиков...")
-        
-        # Проверяем наличие файлов перед импортом
-        import os.path
-        handlers_path = 'app/handlers'
-        logger.debug(f"Файлы в директории {handlers_path}: {os.listdir(handlers_path) if os.path.exists(handlers_path) else 'Директория не найдена'}")
-        
-        from app.handlers import registration, menu, learning, training, settings, admin, review
-        
-        # Выводим информацию о регистрационном обработчике
-        logger.debug(f"Регистрационный модуль импортирован: {registration}")
-        logger.debug(f"Роутеры в регистрационном модуле: {registration.router}")
-        
-        from app.database.db import get_session
-        
-        # Регистрация роутеров
-        logger.info("Регистрация роутеров...")
-        dp.include_router(registration.router)
-        dp.include_router(menu.router)
-        dp.include_router(learning.router)
-        dp.include_router(training.router)
-        dp.include_router(settings.router)
-        dp.include_router(admin.router)
-        dp.include_router(review.router)
-        
-        # Middleware для добавления сессии базы данных в хэндлеры
-        @dp.update.outer_middleware()
-        async def db_session_middleware(handler, event, data):
-            logger.debug(f"Обработка обновления: {type(event).__name__}")
-            async for session in get_session():
-                data["session"] = session
-                try:
-                    return await handler(event, data)
-                except Exception as e:
-                    logger.exception(f"Ошибка при обработке события {type(event).__name__}: {e}")
-                    raise
-    except Exception as e:
-        logger.error(f"Ошибка при импорте обработчиков: {e}")
-        logger.exception("Трассировка:")
-        sys.exit(1)
-    
-    # Проверка, что бот доступен
-    try:
-        bot_info = await bot.get_me()
-        logger.info(f"Бот успешно подключен: @{bot_info.username} (ID: {bot_info.id})")
-    except Exception as e:
-        logger.error(f"Ошибка при проверке доступности бота: {e}")
-        sys.exit(1)
-    
-    # Добавим базовый обработчик для всех сообщений для отладки
-    @dp.message()
-    async def debug_message_handler(message, bot):
-        logger.debug(f"Получено сообщение: {message.text}")
-        # Не отвечаем, просто логируем для отладки
+    # Регистрация роутера
+    dp.include_router(router)
     
     # Запуск бота
-    logger.info("Запуск бота в режиме polling...")
-    try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
-        logger.exception("Трассировка:")
-        sys.exit(1)
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     # Запускаем простой HTTP сервер в отдельном потоке для Render.com
@@ -148,12 +164,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
     
-    # Запускаем бота
-    logger.info("Запуск TalkeryBot...")
-    try:
-        asyncio.run(start_bot())
-    except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем")
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-        logger.exception("Трассировка:")
+    logger.info("Запуск бота...")
+    asyncio.run(main())
