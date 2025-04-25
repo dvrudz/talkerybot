@@ -10,7 +10,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -84,44 +83,85 @@ async def process_name(message: types.Message, state: FSMContext):
     Обработчик ввода имени при регистрации.
     """
     try:
-        await state.update_data(name=message.text)
+        logger.info(f"Обработка имени: {message.text} от пользователя {message.from_user.id}")
         
-        await message.answer(
-            f"Приятно познакомиться, {message.text}!\n\n"
-            "Какой язык вы хотите изучать?",
-            reply_markup=language_keyboard()
-        )
-        await state.set_state(RegistrationForm.language)
-        logger.info(f"Пользователь {message.from_user.id} ввел имя: {message.text}")
+        # Валидация имени (простая проверка)
+        if not message.text or len(message.text) > 100:
+            await message.answer("Пожалуйста, введите корректное имя (не более 100 символов)")
+            return
+            
+        # Сохраняем имя в состоянии
+        await state.update_data(name=message.text)
+        logger.info(f"Имя сохранено в состоянии для {message.from_user.id}")
+        
+        # Отправляем сообщение с клавиатурой выбора языка
+        try:
+            keyboard = language_keyboard()
+            logger.info(f"Клавиатура выбора языка создана для {message.from_user.id}")
+            
+            await message.answer(
+                f"Приятно познакомиться, {message.text}!\n\n"
+                "Какой язык вы хотите изучать?",
+                reply_markup=keyboard
+            )
+            logger.info(f"Сообщение с клавиатурой отправлено пользователю {message.from_user.id}")
+            
+            # Устанавливаем следующее состояние
+            await state.set_state(RegistrationForm.language)
+            logger.info(f"Установлено состояние RegistrationForm.language для {message.from_user.id}")
+        except Exception as keyboard_error:
+            logger.exception(f"Ошибка при отправке клавиатуры: {keyboard_error}")
+            await message.answer("Произошла ошибка при формировании меню. Пожалуйста, попробуйте команду /start снова.")
+            await state.clear()
+            return
+            
     except Exception as e:
-        logger.exception(f"Ошибка в обработчике process_name: {e}")
-        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
-
+        logger.exception(f"Подробная ошибка в обработчике process_name: {str(e)}")
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова или напишите /start для перезапуска.")
+        # Очищаем состояние при ошибке
+        await state.clear()
+        
 @router.message(RegistrationForm.language)
 async def process_language(message: types.Message, state: FSMContext):
     """
     Обработчик выбора языка при регистрации.
     """
     try:
+        logger.info(f"Обработка выбора языка: {message.text} от пользователя {message.from_user.id}")
+        
         if message.text in ["🇬🇧 Английский", "🇩🇪 Немецкий"]:
             language = "english" if message.text == "🇬🇧 Английский" else "german"
-            await state.update_data(language=language)
             
+            # Сохраняем выбор в состоянии
+            await state.update_data(language=language)
+            logger.info(f"Язык {language} сохранен в состоянии для {message.from_user.id}")
+            
+            # Создаем клавиатуру уровней
+            keyboard = level_keyboard()
+            logger.info(f"Клавиатура выбора уровня создана для {message.from_user.id}")
+            
+            # Отправляем сообщение с выбором уровня
             await message.answer(
                 f"Отлично! Вы выбрали изучение {message.text.lower().replace('🇬🇧 ', '').replace('🇩🇪 ', '')}.\n\n"
                 "Теперь выберите ваш текущий уровень:",
-                reply_markup=level_keyboard()
+                reply_markup=keyboard
             )
+            logger.info(f"Сообщение с выбором уровня отправлено пользователю {message.from_user.id}")
+            
+            # Устанавливаем следующее состояние
             await state.set_state(RegistrationForm.level)
-            logger.info(f"Пользователь {message.from_user.id} выбрал язык: {language}")
+            logger.info(f"Установлено состояние RegistrationForm.level для {message.from_user.id}")
         else:
             await message.answer(
                 "Пожалуйста, выберите язык, используя кнопки ниже.",
                 reply_markup=language_keyboard()
             )
+            logger.info(f"Пользователь {message.from_user.id} ввел некорректный язык: {message.text}")
     except Exception as e:
-        logger.exception(f"Ошибка в обработчике process_language: {e}")
-        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
+        logger.exception(f"Подробная ошибка в обработчике process_language: {str(e)}")
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова или напишите /start для перезапуска.")
+        # Очищаем состояние при ошибке
+        await state.clear()
 
 @router.message(RegistrationForm.level)
 async def process_level(message: types.Message, state: FSMContext):
@@ -129,14 +169,24 @@ async def process_level(message: types.Message, state: FSMContext):
     Обработчик выбора уровня при регистрации.
     """
     try:
+        logger.info(f"Обработка выбора уровня: {message.text} от пользователя {message.from_user.id}")
+        
         if message.text in ["A1", "A2", "B1", "B2"]:
+            # Получаем сохраненные данные
             user_data = await state.get_data()
-            name = user_data["name"]
-            language = user_data["language"]
+            logger.info(f"Получены данные из состояния для {message.from_user.id}: {user_data}")
+            
+            name = user_data.get("name", "Пользователь")
+            language = user_data.get("language", "english")
             level = message.text
             
             # Здесь будет создание пользователя в базе данных
             # (просто выводим сообщение об успешной регистрации для отладки)
+            logger.info(f"Регистрация успешна для {message.from_user.id}: имя={name}, язык={language}, уровень={level}")
+            
+            # Создаем основную клавиатуру
+            keyboard = main_menu_keyboard()
+            logger.info(f"Основная клавиатура создана для {message.from_user.id}")
             
             await message.answer(
                 f"Отлично! Ваш профиль создан.\n\n"
@@ -144,20 +194,24 @@ async def process_level(message: types.Message, state: FSMContext):
                 f"• Язык: {language}\n"
                 f"• Уровень: {level}\n\n"
                 f"Все готово! Начнем изучение 🚀",
-                reply_markup=main_menu_keyboard()
+                reply_markup=keyboard
             )
+            logger.info(f"Сообщение с подтверждением регистрации отправлено пользователю {message.from_user.id}")
             
             # Очищаем состояние
             await state.clear()
-            logger.info(f"Пользователь {message.from_user.id} успешно зарегистрирован")
+            logger.info(f"Состояние очищено для пользователя {message.from_user.id}")
         else:
             await message.answer(
                 "Пожалуйста, выберите уровень, используя кнопки ниже.",
                 reply_markup=level_keyboard()
             )
+            logger.info(f"Пользователь {message.from_user.id} ввел некорректный уровень: {message.text}")
     except Exception as e:
-        logger.exception(f"Ошибка в обработчике process_level: {e}")
-        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
+        logger.exception(f"Подробная ошибка в обработчике process_level: {str(e)}")
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова или напишите /start для перезапуска.")
+        # Очищаем состояние при ошибке
+        await state.clear()
 
 # Функция для удаления webhook перед запуском
 async def delete_webhook():
