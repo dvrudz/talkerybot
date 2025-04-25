@@ -5,6 +5,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ from app.database.db import get_session
 from app.services.notification_service import NotificationService
 
 # Initialize bot and dispatcher
-bot = Bot(token=os.getenv("BOT_TOKEN"), parse_mode=ParseMode.HTML)
+bot = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
 # Register all routers
@@ -72,4 +73,4 @@ async def main():
 
 if __name__ == "__main__":
     logging.info("Starting TalkeryBot...")
-    asyncio.run(main()) 
+    asyncio.run(main())
