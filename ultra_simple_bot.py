@@ -5,7 +5,6 @@ import os
 import sys
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
@@ -30,14 +29,6 @@ if not BOT_TOKEN:
 # Создаем роутер
 router = Router()
 
-# Функция для создания клавиатуры
-def get_main_keyboard():
-    """Создает основную клавиатуру бота"""
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("🇬🇧 Английский"), KeyboardButton("🇩🇪 Немецкий"))
-    kb.add(KeyboardButton("ℹ️ Помощь"), KeyboardButton("🔍 О боте"))
-    return kb
-
 # Обработчики команд
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -45,15 +36,7 @@ async def cmd_start(message: types.Message):
     Обработчик команды /start.
     """
     try:
-        # Создаем клавиатуру
-        keyboard = get_main_keyboard()
-        logger.info(f"Клавиатура создана для пользователя {message.from_user.id}")
-        
-        # Отправляем приветствие с клавиатурой
-        await message.answer(
-            "Привет! Я простой тестовый бот с клавиатурой.\nВыберите опцию или используйте /help для справки.",
-            reply_markup=keyboard
-        )
+        await message.answer("Привет! Я простой тестовый бот. Используй /help для получения справки.")
         logger.info(f"Отправлено приветствие пользователю: {message.from_user.id}")
     except Exception as e:
         logger.exception(f"Ошибка в обработчике start: {e}")
@@ -63,13 +46,11 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     """Обработчик команды /help"""
     try:
-        keyboard = get_main_keyboard()
         await message.answer(
             "Базовые команды:\n"
             "• /start - начать работу с ботом\n"
             "• /help - показать эту справку\n"
-            "• /ping - проверить работу бота\n",
-            reply_markup=keyboard
+            "• /ping - проверить работу бота\n"
         )
         logger.info(f"Отправлена справка пользователю: {message.from_user.id}")
     except Exception as e:
@@ -86,36 +67,15 @@ async def cmd_ping(message: types.Message):
         logger.exception(f"Ошибка в обработчике ping: {e}")
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова позже.")
 
-# Обработчик текстовых сообщений
+# Обработчик всех сообщений
 @router.message()
 async def echo(message: types.Message):
-    """Обработчик для любых текстовых сообщений"""
+    """Простой эхо-обработчик"""
     try:
-        # Обрабатываем кнопки клавиатуры
-        if message.text == "ℹ️ Помощь":
-            return await cmd_help(message)
-        elif message.text == "🔍 О боте":
-            await message.answer(
-                "О боте TalkeryBot:\n\n"
-                "Версия: 1.0.0\n"
-                "Бот для изучения иностранных языков"
-            )
-            logger.info(f"Отправлена информация о боте пользователю: {message.from_user.id}")
-            return
-        elif message.text in ["🇬🇧 Английский", "🇩🇪 Немецкий"]:
-            language = "английский" if message.text == "🇬🇧 Английский" else "немецкий"
-            await message.answer(
-                f"Вы выбрали {language} язык.\n"
-                f"В настоящий момент бот работает в демонстрационном режиме."
-            )
-            logger.info(f"Пользователь {message.from_user.id} выбрал язык: {language}")
-            return
-            
-        # Стандартное эхо для других сообщений
-        await message.answer(f"Вы написали: {message.text}", reply_markup=get_main_keyboard())
+        await message.answer(f"Вы написали: {message.text}")
         logger.info(f"Эхо для пользователя {message.from_user.id}: {message.text}")
     except Exception as e:
-        logger.exception(f"Ошибка в обработчике сообщений: {e}")
+        logger.exception(f"Ошибка в эхо-обработчике: {e}")
         await message.answer("Произошла ошибка при обработке сообщения.")
 
 # Функция для удаления webhook перед запуском
