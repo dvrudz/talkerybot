@@ -18,8 +18,13 @@ load_dotenv()
 # access to the values within the .ini file in use.
 config = context.config
 
+# Get database URL and modify it for asyncpg if needed
+database_url = os.getenv("DATABASE_URL")
+if database_url and database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+
 # Override sqlalchemy.url with value from environment
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -94,4 +99,4 @@ def run_migrations_online() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online() 
+    run_migrations_online()
