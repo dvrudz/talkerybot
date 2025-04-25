@@ -162,12 +162,14 @@ async def check_bot_health():
         await asyncio.sleep(10)
         
         from aiogram import Bot
+        from aiogram.client.default import DefaultBotProperties
+        
         BOT_TOKEN = os.getenv("BOT_TOKEN")
         if not BOT_TOKEN:
             logger.error("BOT_TOKEN не найден в переменных окружения")
             return
         
-        bot = Bot(token=BOT_TOKEN)
+        bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties())
         bot_info = await bot.get_me()
         logger.info(f"Бот успешно запущен: @{bot_info.username} ({bot_info.id})")
         await bot.session.close()
