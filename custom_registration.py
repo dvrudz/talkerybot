@@ -159,8 +159,23 @@ async def process_level(message: types.Message, state: FSMContext):
         logger.exception(f"Ошибка в обработчике process_level: {e}")
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
+# Функция для удаления webhook перед запуском
+async def delete_webhook():
+    """Удаляет webhook если он установлен"""
+    try:
+        bot_temp = Bot(token=BOT_TOKEN)
+        await bot_temp.delete_webhook()
+        info = await bot_temp.get_webhook_info()
+        logger.info(f"Webhook удален: {info.url is None}")
+        await bot_temp.session.close()
+    except Exception as e:
+        logger.error(f"Ошибка при удалении webhook: {e}")
+
 # Запуск бота
 async def main():
+    # Удаляем webhook перед запуском бота
+    await delete_webhook()
+    
     # Инициализация бота и диспетчера
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
@@ -172,4 +187,31 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    # Запускаем простой HTTP сервер в отдельном потоке для Render.com
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class SimpleHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'Bot is running!')
+        
+        def log_message(self, format, *args):
+            return  # Отключаем логирование HTTP-запросов
+    
+    # Запуск HTTP сервера в отдельном потоке
+    def run_server():
+        port = int(os.environ.get("PORT", 10000))
+        server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+        logger.info(f"Запуск HTTP сервера на порту {port}...")
+        server.serve_forever()
+    
+    # Запускаем HTTP сервер в отдельном потоке
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # Запускаем бота
     asyncio.run(main())
