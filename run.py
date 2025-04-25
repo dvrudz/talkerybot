@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -14,6 +16,21 @@ logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
 load_dotenv()
+
+# Определяем порт из переменных окружения или используем порт по умолчанию
+PORT = int(os.environ.get("PORT", 10000))
+
+# Простой веб-сервер для Render.com
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'TalkeryBot is running!')
+    
+    def log_message(self, format, *args):
+        # Отключаем логирование HTTP-запросов
+        return
 
 async def run_alembic():
     """Запуск Alembic для создания таблиц в базе данных"""
@@ -38,13 +55,17 @@ async def import_sample_data():
         logger.error(f"Ошибка при импорте примеров слов: {e}")
         return False
 
-async def start_bot():
-    """Запуск бота"""
+def run_web_server():
+    """Запуск веб-сервера"""
+    server = HTTPServer(('0.0.0.0', PORT), SimpleHTTPRequestHandler)
+    logger.info(f"Запуск веб-сервера на порту {PORT}...")
+    server.serve_forever()
+
+def start_bot_thread():
+    """Запуск бота в отдельном потоке"""
     logger.info("Запуск Telegram-бота...")
     try:
         import bot
-        # bot.py содержит бесконечный цикл, поэтому этот код не выполнится до остановки бота
-        logger.info("Бот остановлен")
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {e}")
 
@@ -65,8 +86,13 @@ async def main():
     if db_initialized:
         await import_sample_data()
     
-    # Запуск бота
-    await start_bot()
+    # Запуск бота в отдельном потоке
+    bot_thread = threading.Thread(target=start_bot_thread)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Запуск веб-сервера в основном потоке
+    run_web_server()
 
 if __name__ == "__main__":
     asyncio.run(main())
