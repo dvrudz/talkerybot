@@ -1,108 +1,118 @@
 #!/usr/bin/env python
+import asyncio
 import logging
 import os
 import sys
-from aiohttp import web
-from aiogram import Bot, Dispatcher
+from datetime import time, datetime
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiohttp import web
 from dotenv import load_dotenv
 
-# Импорт маршрутизаторов и сервисов
 from app.handlers import registration, menu, learning, training, settings, admin, review
-from app.middlewares.db_session import DatabaseSessionMiddleware
-from app.services.notification_service import NotificationService
-from app.database.database import get_async_session
+from app.middlewares.db_middleware import DbSessionMiddleware
+from app.services.db import create_session_pool
+from app.services.notification_service import send_review_notifications
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout
 )
-logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
 load_dotenv()
-
-# Конфигурация webhook
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
-# Проверка обязательных переменных окружения
+# Проверка наличия необходимых переменных окружения
 if not BOT_TOKEN:
-    logger.error("Не найден BOT_TOKEN в переменных окружения")
+    logging.error("Пожалуйста, установите переменную окружения BOT_TOKEN")
     sys.exit(1)
 
 if not WEBHOOK_HOST:
-    logger.error("Не найден WEBHOOK_HOST в переменных окружения")
+    logging.error("Пожалуйста, установите переменную окружения WEBHOOK_HOST")
     sys.exit(1)
 
 # Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dispatcher = Dispatcher()
 
-# Регистрация маршрутизаторов
-dp.include_router(registration.router)
-dp.include_router(menu.router)
-dp.include_router(learning.router)
-dp.include_router(training.router)
-dp.include_router(settings.router)
-dp.include_router(admin.router)
-dp.include_router(review.router)
+# Регистрация роутеров для разных функциональностей
+dispatcher.include_router(registration.router)
+dispatcher.include_router(menu.router)
+dispatcher.include_router(learning.router)
+dispatcher.include_router(training.router)
+dispatcher.include_router(settings.router)
+dispatcher.include_router(admin.router)
+dispatcher.include_router(review.router)
 
-# Инициализация сервиса уведомлений
-notification_service = NotificationService(bot)
+# Функция для отправки уведомлений в определенное время
+async def scheduled_notifications():
+    notification_time = time(10, 0)  # 10:00 AM
+    while True:
+        now = datetime.now().time()
+        
+        # Проверяем, наступило ли время отправки уведомлений
+        if now.hour == notification_time.hour and now.minute == notification_time.minute:
+            try:
+                await send_review_notifications(bot)
+                logging.info("Уведомления о повторении отправлены")
+            except Exception as e:
+                logging.error(f"Ошибка при отправке уведомлений: {e}")
+        
+        # Ждем 1 минуту перед следующей проверкой
+        await asyncio.sleep(60)
 
-# Создание middleware для инъекции сессии базы данных
-db_session_middleware = DatabaseSessionMiddleware(get_async_session)
-dp.message.middleware(db_session_middleware)
-dp.callback_query.middleware(db_session_middleware)
-
-# Функция для настройки вебхука
-async def on_startup(app):
-    """Настройка вебхука при запуске приложения"""
+async def on_startup(bot: Bot):
+    # Настройка вебхука
     await bot.set_webhook(url=WEBHOOK_URL)
-    logger.info(f"Вебхук установлен на URL: {WEBHOOK_URL}")
-
-# Функция для очистки при завершении
-async def on_shutdown(app):
-    """Очистка ресурсов при завершении"""
-    await bot.delete_webhook()
-    await bot.session.close()
-    logger.info("Бот остановлен, вебхук удален")
-
-# Маршрут для проверки работоспособности
-async def health_check(request):
-    """Эндпоинт для проверки работоспособности"""
-    return web.Response(text="Bot is running!")
-
-# Создание веб-приложения
-app = web.Application()
-
-# Добавление обработчиков событий
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
-
-# Добавление маршрута для проверки работоспособности
-app.router.add_get("/", health_check)
-
-# Настройка обработчика webhook запросов
-webhook_handler = SimpleRequestHandler(
-    dispatcher=dp,
-    bot=bot,
-)
-
-# Настройка вебхука в приложении
-webhook_handler.register(app, path=WEBHOOK_PATH)
-
-# Настройка aiohttp-приложения
-setup_application(app, dp)
-
-# Запуск веб-сервера
-if __name__ == "__main__":
-    # Получаем порт из переменной окружения или используем 8080 по умолчанию
-    PORT = int(os.getenv("PORT", 8080))
+    logging.info(f"Вебхук установлен на {WEBHOOK_URL}")
     
-    logger.info(f"Запуск веб-сервера на порту {PORT}...")
-    web.run_app(app, host="0.0.0.0", port=PORT)
+    # Запуск задачи отправки уведомлений
+    asyncio.create_task(scheduled_notifications())
+
+async def on_shutdown(bot: Bot):
+    # Удаление вебхука при выключении
+    await bot.delete_webhook()
+    logging.info("Вебхук удален")
+
+async def main():
+    # Создание пула сессий базы данных
+    session_pool = await create_session_pool()
+    
+    # Регистрация middleware для добавления сессии базы данных в хэндлеры
+    dispatcher.update.middleware(DbSessionMiddleware(session_pool))
+    
+    # Создание веб-приложения
+    app = web.Application()
+    
+    # Настройка обработчика вебхуков
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dispatcher,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    
+    # Настройка запуска и завершения
+    setup_application(app, dispatcher, bot=bot, on_startup=on_startup, on_shutdown=on_shutdown)
+    
+    # Запуск веб-сервера
+    host = "0.0.0.0"
+    port = int(os.getenv("PORT", 8080))
+    logging.info(f"Запуск webhook сервера на {host}:{port}")
+    
+    # Запуск веб-приложения
+    web.run_app(app, host=host, port=port)
+
+if __name__ == "__main__":
+    logging.info("Запуск бота TalkeryBot в режиме webhook")
+    asyncio.run(main())
